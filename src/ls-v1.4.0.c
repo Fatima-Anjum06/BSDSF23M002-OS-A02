@@ -4,17 +4,36 @@
 #include <stdlib.h>
 #include <string.h>
 #include <dirent.h>
-#include <unistd.h>
 #include <sys/ioctl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <unistd.h>
 #include <pwd.h>
 #include <grp.h>
 #include <time.h>
 
-enum DisplayMode { MODE_DEFAULT, MODE_LONG, MODE_HORIZONTAL };
+/* ---------- Display Modes ---------- */
+typedef enum {
+    MODE_DEFAULT,
+    MODE_LONG,
+    MODE_HORIZONTAL
+} DisplayMode;
 
-/* Gather filenames (ignores hidden files) */
+/* ---------- Function Declarations ---------- */
+char **gather_filenames(const char *path, int *count, int *max_len);
+void print_down_then_across(char **files, int count, int max_len);
+void print_horizontal(char **files, int count, int max_len);
+void print_long_format(const char *path);
+int cmpfunc(const void *a, const void *b);
+
+/* ---------- Comparison Function for qsort ---------- */
+int cmpfunc(const void *a, const void *b) {
+    const char *fa = *(const char **)a;
+    const char *fb = *(const char **)b;
+    return strcmp(fa, fb);
+}
+
+/* ---------- Gather Filenames ---------- */
 char **gather_filenames(const char *path, int *count, int *max_len) {
     DIR *dir = opendir(path);
     if (!dir) {
@@ -23,7 +42,9 @@ char **gather_filenames(const char *path, int *count, int *max_len) {
     }
 
     struct dirent *entry;
-    int capacity = 10;
+    int capacity = 20;
+    int n = 0;
+    *max_len = 0;
     char **files = malloc(capacity * sizeof(char *));
     if (!files) {
         perror("malloc");
@@ -31,60 +52,55 @@ char **gather_filenames(const char *path, int *count, int *max_len) {
         return NULL;
     }
 
-    *count = 0;
-    *max_len = 0;
-
     while ((entry = readdir(dir)) != NULL) {
-        if (entry->d_name[0] == '.') continue;
-        if (*count >= capacity) {
+        if (entry->d_name[0] == '.') continue; // skip hidden
+        if (n >= capacity) {
             capacity *= 2;
             files = realloc(files, capacity * sizeof(char *));
-            if (!files) {
-                perror("realloc");
-                closedir(dir);
-                return NULL;
-            }
         }
-        files[*count] = strdup(entry->d_name);
-        int len = strlen(entry->d_name);
-        if (len > *max_len) *max_len = len;
-        (*count)++;
+        files[n] = strdup(entry->d_name);
+        if ((int)strlen(entry->d_name) > *max_len)
+            *max_len = strlen(entry->d_name);
+        n++;
     }
 
     closedir(dir);
+    *count = n;
     return files;
 }
 
-/* Comparator for qsort */
-int cmpfunc(const void *a, const void *b) {
-    const char *fa = *(const char **)a;
-    const char *fb = *(const char **)b;
-    return strcmp(fa, fb);
-}
-
-/* Get terminal width (fallback = 80) */
-int get_terminal_width() {
-    struct winsize w;
-    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) == -1 || w.ws_col == 0)
-        return 80;
-    return w.ws_col;
-}
-
-/* Default down-then-across display (placeholder) */
+/* ---------- Down-Then-Across Display ---------- */
 void print_down_then_across(char **files, int count, int max_len) {
-    printf(">>> Default down-then-across display\n");
-    for (int i = 0; i < count; i++)
-        printf("%s\n", files[i]);
+    (void)max_len; // suppress unused warning
+    struct winsize ws;
+    int term_width = 80;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0)
+        term_width = ws.ws_col;
+
+    int spacing = 2;
+    int col_width = max_len + spacing;
+    int num_cols = term_width / col_width;
+    if (num_cols < 1) num_cols = 1;
+    int num_rows = (count + num_cols - 1) / num_cols;
+
+    for (int r = 0; r < num_rows; r++) {
+        for (int c = 0; c < num_cols; c++) {
+            int idx = c * num_rows + r;
+            if (idx < count)
+                printf("%-*s", col_width, files[idx]);
+        }
+        printf("\n");
+    }
 }
 
-/* Long listing placeholder */
-void print_long_format(const char *path) {
-    printf(">>> Long listing mode (placeholder)\n");
-}
-
-/* Horizontal display (-x) */
+/* ---------- Horizontal (-x) Display ---------- */
 void print_horizontal(char **files, int count, int max_len) {
-    int term_width = get_terminal_width();
+    (void)max_len; // suppress unused warning
+    struct winsize ws;
+    int term_width = 80;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0)
+        term_width = ws.ws_col;
+
     int spacing = 2;
     int col_width = max_len + spacing;
     int current_width = 0;
@@ -100,11 +116,18 @@ void print_horizontal(char **files, int count, int max_len) {
     printf("\n");
 }
 
-/* MAIN FUNCTION */
-int main(int argc, char *argv[]) {
-    int opt;
-    enum DisplayMode mode = MODE_DEFAULT;
+/* ---------- Long Listing Placeholder ---------- */
+void print_long_format(const char *path) {
+    (void)path; // suppress unused warning
+    printf(">>> Long listing mode (placeholder for now)\n");
+}
 
+/* ---------- MAIN ---------- */
+int main(int argc, char *argv[]) {
+    DisplayMode mode = MODE_DEFAULT;
+    int opt;
+
+    /* Parse command-line arguments */
     while ((opt = getopt(argc, argv, "lx")) != -1) {
         switch (opt) {
             case 'l':
@@ -114,9 +137,36 @@ int main(int argc, char *argv[]) {
                 mode = MODE_HORIZONTAL;
                 break;
             default:
-                fprintf(stderr, "Usage: %s [-l|-x] [directory]\n", argv[0]);
+                fprintf(stderr, "Usage: %s [-l | -x] [path]\n", argv[0]);
                 return EXIT_FAILURE;
         }
     }
 
-    const char *path = (optin*
+    const char *path = (optind < argc) ? argv[optind] : ".";
+    int count, max_len;
+    char **files = gather_filenames(path, &count, &max_len);
+    if (!files) return EXIT_FAILURE;
+
+    /* Sort alphabetically for all display modes */
+    qsort(files, count, sizeof(char *), cmpfunc);
+
+    /* Display files */
+    switch (mode) {
+        case MODE_LONG:
+            print_long_format(path);
+            break;
+        case MODE_HORIZONTAL:
+            print_horizontal(files, count, max_len);
+            break;
+        default:
+            print_down_then_across(files, count, max_len);
+            break;
+    }
+
+    /* Free memory */
+    for (int i = 0; i < count; i++)
+        free(files[i]);
+    free(files);
+
+    return EXIT_SUCCESS;
+}
