@@ -3,12 +3,17 @@
 
 CC = gcc
 CFLAGS = -Wall -Wextra -std=c11
-TARGET = myls
+SRC = src/ls-v1.0.0.c
+OBJ = obj/ls-v1.0.0.o
+BIN = bin/ls
 
-all: $(TARGET)
+all: $(BIN)
 
-$(TARGET): main.c
-	$(CC) $(CFLAGS) -o $(TARGET) main.c
+$(BIN): $(OBJ)
+	$(CC) $(CFLAGS) -o $(BIN) $(OBJ)
+
+$(OBJ): $(SRC)
+	$(CC) $(CFLAGS) -c $(SRC) -o $(OBJ)
 
 clean:
-	rm -f $(TARGET)
+	rm -f $(OBJ) $(BIN)
