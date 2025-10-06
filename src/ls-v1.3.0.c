@@ -4,19 +4,20 @@
 #include <stdlib.h>
 #include <string.h>
 #include <dirent.h>
-#include <unistd.h>     // for getopt(), optind
-#include <sys/ioctl.h>  // for terminal size
+#include <unistd.h>
+#include <sys/ioctl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <pwd.h>
 #include <grp.h>
 #include <time.h>
 
-/*
- * Function: gather_filenames
+enum DisplayMode { MODE_DEFAULT, MODE_LONG, MODE_HORIZONTAL };
+
+/* Function: gather_filenames
  * --------------------------
- * Reads all non-hidden filenames from a directory into a dynamic array.
- * Tracks the total count and the longest filename length.
+ * Reads all filenames (excluding hidden files) into a dynamic array
+ * and tracks the longest filename.
  */
 char **gather_filenames(const char *path, int *count, int *max_len) {
     DIR *dir = opendir(path);
@@ -26,9 +27,7 @@ char **gather_filenames(const char *path, int *count, int *max_len) {
     }
 
     struct dirent *entry;
-    int capacity = 20;
-    *count = 0;
-    *max_len = 0;
+    int capacity = 10;
     char **files = malloc(capacity * sizeof(char *));
     if (!files) {
         perror("malloc");
@@ -36,14 +35,20 @@ char **gather_filenames(const char *path, int *count, int *max_len) {
         return NULL;
     }
 
-    while ((entry = readdir(dir)) != NULL) {
-        if (entry->d_name[0] == '.') continue; // skip hidden files
+    *count = 0;
+    *max_len = 0;
 
+    while ((entry = readdir(dir)) != NULL) {
+        if (entry->d_name[0] == '.') continue; // Skip hidden files
         if (*count >= capacity) {
             capacity *= 2;
             files = realloc(files, capacity * sizeof(char *));
+            if (!files) {
+                perror("realloc");
+                closedir(dir);
+                return NULL;
+            }
         }
-
         files[*count] = strdup(entry->d_name);
         int len = strlen(entry->d_name);
         if (len > *max_len) *max_len = len;
@@ -54,88 +59,98 @@ char **gather_filenames(const char *path, int *count, int *max_len) {
     return files;
 }
 
-/*
- * Function: print_down_then_across
+/* Get terminal width (fallback = 80) */
+int get_terminal_width() {
+    struct winsize w;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) == -1 || w.ws_col == 0)
+        return 80;
+    return w.ws_col;
+}
+
+/* Function: print_down_then_across
  * --------------------------------
- * Prints files in column-major order (default behavior).
+ * Default layout (previous feature placeholder)
  */
 void print_down_then_across(char **files, int count, int max_len) {
-    struct winsize w;
-    int term_width = 80;
-    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) == 0)
-        term_width = w.ws_col;
-
-    int spacing = 2;
-    int cols = term_width / (max_len + spacing);
-    if (cols < 1) cols = 1;
-    int rows = (count + cols - 1) / cols;
-
-    for (int r = 0; r < rows; r++) {
-        for (int c = 0; c < cols; c++) {
-            int index = c * rows + r;
-            if (index < count)
-                printf("%-*s", max_len + spacing, files[index]);
-        }
-        printf("\n");
+    printf(">>> Default down-then-across display (placeholder for now)\n");
+    for (int i = 0; i < count; i++) {
+        printf("%s\n", files[i]);
     }
 }
 
-/*
- * Function: print_horizontal
- * --------------------------
- * Prints files in row-major order (for the -x flag).
+/* Function: print_long_format
+ * ----------------------------
+ * Placeholder for previous -l long listing version
+ */
+void print_long_format(const char *path) {
+    printf(">>> Long listing mode (placeholder for now)\n");
+}
+
+/* Function: print_horizontal
+ * ----------------------------
+ * Implements the -x horizontal display mode.
  */
 void print_horizontal(char **files, int count, int max_len) {
-    struct winsize w;
-    int term_width = 80;
-    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) == 0)
-        term_width = w.ws_col;
-
+    int term_width = get_terminal_width();
     int spacing = 2;
-    int cols = term_width / (max_len + spacing);
-    if (cols < 1) cols = 1;
+    int col_width = max_len + spacing;
+    int current_width = 0;
 
     for (int i = 0; i < count; i++) {
-        printf("%-*s", max_len + spacing, files[i]);
-        if ((i + 1) % cols == 0)
+        int len = strlen(files[i]);
+        if (current_width + col_width > term_width) {
             printf("\n");
+            current_width = 0;
+        }
+        printf("%-*s", col_width, files[i]);
+        current_width += col_width;
     }
-    if (count % cols != 0)
-        printf("\n");
+    printf("\n");
 }
 
-/*
- * Function: main
- * --------------
- * Entry point — handles argument parsing and display mode.
+/* MAIN FUNCTION
+ * Integrates argument parsing and display selection
  */
 int main(int argc, char *argv[]) {
     int opt;
-    int horizontal_mode = 0; // 0 = default, 1 = -x
+    enum DisplayMode mode = MODE_DEFAULT;
 
-    while ((opt = getopt(argc, argv, "x")) != -1) {
+    // Parse -l and -x options
+    while ((opt = getopt(argc, argv, "lx")) != -1) {
         switch (opt) {
+            case 'l':
+                mode = MODE_LONG;
+                break;
             case 'x':
-                horizontal_mode = 1;
+                mode = MODE_HORIZONTAL;
                 break;
             default:
-                fprintf(stderr, "Usage: %s [-x] [directory]\n", argv[0]);
+                fprintf(stderr, "Usage: %s [-l|-x] [directory]\n", argv[0]);
                 return EXIT_FAILURE;
         }
     }
 
     const char *path = (optind < argc) ? argv[optind] : ".";
-    int count = 0, max_len = 0;
+
+    int count, max_len;
     char **files = gather_filenames(path, &count, &max_len);
     if (!files) return EXIT_FAILURE;
 
-    if (horizontal_mode)
-        print_horizontal(files, count, max_len);
-    else
-        print_down_then_across(files, count, max_len);
+    // Choose the display mode
+    switch (mode) {
+        case MODE_LONG:
+            print_long_format(path);
+            break;
+        case MODE_HORIZONTAL:
+            print_horizontal(files, count, max_len);
+            break;
+        default:
+            print_down_then_across(files, count, max_len);
+            break;
+    }
 
-    for (int i = 0; i < count; i++)
-        free(files[i]);
+    // Cleanup
+    for (int i = 0; i < count; i++) free(files[i]);
     free(files);
 
     return EXIT_SUCCESS;
