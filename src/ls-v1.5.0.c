@@ -16,7 +16,9 @@
 #define COLOR_RESET   "\033[0m"
 #define COLOR_BLUE    "\033[34m"
 #define COLOR_GREEN   "\033[32m"
-#define COLOR_CYAN    "\033[36m"
+#define COLOR_RED     "\033[31m"
+#define COLOR_MAGENTA "\033[35m"
+#define COLOR_REVERSE "\033[7m"
 
 // ----- Function Prototypes -----
 char **gather_filenames(const char *path, int *count, int *max_len);
@@ -103,6 +105,11 @@ void print_permissions(mode_t mode) {
     char perms[11] = "----------";
     if (S_ISDIR(mode)) perms[0] = 'd';
     if (S_ISLNK(mode)) perms[0] = 'l';
+    if (S_ISCHR(mode)) perms[0] = 'c';
+    if (S_ISBLK(mode)) perms[0] = 'b';
+    if (S_ISFIFO(mode)) perms[0] = 'p';
+    if (S_ISSOCK(mode)) perms[0] = 's';
+
     if (mode & S_IRUSR) perms[1] = 'r';
     if (mode & S_IWUSR) perms[2] = 'w';
     if (mode & S_IXUSR) perms[3] = 'x';
@@ -113,6 +120,22 @@ void print_permissions(mode_t mode) {
     if (mode & S_IWOTH) perms[8] = 'w';
     if (mode & S_IXOTH) perms[9] = 'x';
     printf("%s ", perms);
+}
+
+// ----- Determine Color and Print -----
+void print_colored(const char *path, const char *name) {
+    struct stat st;
+    char fullpath[1024];
+    snprintf(fullpath, sizeof(fullpath), "%s/%s", path, name);
+
+    if (lstat(fullpath, &st) == -1) { perror("lstat"); printf("%s  ", name); return; }
+
+    if (S_ISDIR(st.st_mode)) printf(COLOR_BLUE "%s" COLOR_RESET "  ", name);
+    else if (S_ISLNK(st.st_mode)) printf(COLOR_MAGENTA "%s" COLOR_RESET "  ", name);
+    else if (S_ISREG(st.st_mode) && (st.st_mode & S_IXUSR)) printf(COLOR_GREEN "%s" COLOR_RESET "  ", name);
+    else if (strstr(name, ".tar") || strstr(name, ".gz") || strstr(name, ".zip")) printf(COLOR_RED "%s" COLOR_RESET "  ", name);
+    else if (S_ISCHR(st.st_mode) || S_ISBLK(st.st_mode) || S_ISFIFO(st.st_mode) || S_ISSOCK(st.st_mode)) printf(COLOR_REVERSE "%s" COLOR_RESET "  ", name);
+    else printf("%s  ", name);
 }
 
 // ----- Print Long Listing -----
@@ -178,18 +201,4 @@ void print_horizontal(const char *path, char **files, int count, int max_len) {
         cur_width += col_width;
     }
     printf("\n");
-}
-
-// ----- Print Colored Filename -----
-void print_colored(const char *path, const char *name) {
-    struct stat st;
-    char fullpath[1024];
-    snprintf(fullpath, sizeof(fullpath), "%s/%s", path, name);
-
-    if (lstat(fullpath, &st) == -1) { perror("lstat"); printf("%s  ", name); return; }
-
-    if (S_ISDIR(st.st_mode)) printf(COLOR_BLUE "%s" COLOR_RESET "  ", name);
-    else if (st_mode & S_IXUSR) printf(COLOR_GREEN "%s" COLOR_RESET "  ", name);
-    else if (S_ISLNK(st.st_mode)) printf(COLOR_CYAN "%s" COLOR_RESET "  ", name);
-    else printf("%s  ", name);
 }
