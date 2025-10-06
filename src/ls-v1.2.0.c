@@ -12,7 +12,18 @@
 #include <grp.h>
 #include <time.h>
 
-/* ------------------ Gather all filenames ------------------ */
+/*
+ * Function: gather_filenames
+ * --------------------------
+ * Reads all filenames from the given directory path into a dynamically allocated array.
+ * Ignores hidden files (starting with '.').
+ *
+ * path: Directory path to read
+ * count: Pointer to store number of files found
+ * max_len: Pointer to store length of the longest filename
+ *
+ * returns: Pointer to array of strings (filenames). NULL on error.
+ */
 char **gather_filenames(const char *path, int *count, int *max_len) {
     DIR *dir = opendir(path);
     if (!dir) {
@@ -33,14 +44,17 @@ char **gather_filenames(const char *path, int *count, int *max_len) {
     *max_len = 0;
 
     while ((entry = readdir(dir)) != NULL) {
-        if (entry->d_name[0] == '.') continue; // skip hidden files
+        // Skip hidden files
+        if (entry->d_name[0] == '.')
+            continue;
 
-        if (*count >= capacity) {  // resize array
+        if (*count >= capacity) {
             capacity *= 2;
             char **temp = realloc(files, capacity * sizeof(char *));
             if (!temp) {
                 perror("realloc");
-                for (int i = 0; i < *count; i++) free(files[i]);
+                for (int i = 0; i < *count; i++)
+                    free(files[i]);
                 free(files);
                 closedir(dir);
                 return NULL;
@@ -51,11 +65,16 @@ char **gather_filenames(const char *path, int *count, int *max_len) {
         files[*count] = strdup(entry->d_name);
         if (!files[*count]) {
             perror("strdup");
-            continue;
+            for (int i = 0; i < *count; i++)
+                free(files[i]);
+            free(files);
+            closedir(dir);
+            return NULL;
         }
 
         int len = strlen(entry->d_name);
-        if (len > *max_len) *max_len = len;
+        if (len > *max_len)
+            *max_len = len;
 
         (*count)++;
     }
@@ -64,50 +83,63 @@ char **gather_filenames(const char *path, int *count, int *max_len) {
     return files;
 }
 
-/* ------------------ Terminal width & layout ------------------ */
-int get_terminal_width() {
-    struct winsize w;
-    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) == -1) return 80;
-    return w.ws_col;
-}
-
-void calculate_layout(int total_files, int max_len, int spacing, int *cols, int *rows) {
-    int term_width = get_terminal_width();
-    *cols = term_width / (max_len + spacing);
-    if (*cols < 1) *cols = 1;
-
-    *rows = (total_files + *cols - 1) / *cols; // round up
-}
-
-/* ------------------ Main ------------------ */
-int main(int argc, char *argv[]) {
-    char *path = ".";
-    if (argc > 1) path = argv[1];
-
-    int file_count = 0;
-    int max_len = 0;
-
-    char **files = gather_filenames(path, &file_count, &max_len);
-    if (!files || file_count == 0) {
-        printf("No files found in directory: %s\n", path);
-        return 0;
-    }
-
+/*
+ * Function: print_down_then_across
+ * --------------------------------
+ * Prints filenames in "down then across" format, adjusting to terminal width.
+ *
+ * files: array of filenames
+ * count: total number of files
+ * max_len: length of the longest filename
+ * term_width: terminal width in characters
+ */
+void print_down_then_across(char **files, int count, int max_len, int term_width) {
     int spacing = 2;
-    int cols = 0, rows = 0;
+    int col_width = max_len + spacing;
+    int num_cols = term_width / col_width;
 
-    calculate_layout(file_count, max_len, spacing, &cols, &rows);
+    if (num_cols < 1)
+        num_cols = 1;
 
-    printf("Terminal width: %d\n", get_terminal_width());
-    printf("Columns: %d, Rows: %d\n", cols, rows);
-    printf("Files:\n");
-    for (int i = 0; i < file_count; i++) {
-        printf("%s\n", files[i]);
+    int num_rows = (count + num_cols - 1) / num_cols;
+
+    for (int r = 0; r < num_rows; r++) {
+        for (int c = 0; c < num_cols; c++) {
+            int index = c * num_rows + r;
+            if (index < count) {
+                printf("%-*s", col_width, files[index]);
+            }
+        }
+        printf("\n");
+    }
+}
+
+/*
+ * Function: main
+ * --------------
+ * Entry point for ls-v1.2.0
+ * Gathers filenames, determines terminal width, and prints in columns (down then across).
+ */
+int main(int argc, char *argv[]) {
+    const char *path = (argc > 1) ? argv[1] : ".";
+    int count = 0, max_len = 0;
+
+    char **files = gather_filenames(path, &count, &max_len);
+    if (!files || count == 0) {
+        fprintf(stderr, "No files found or error reading directory.\n");
+        return 1;
     }
 
-    for (int i = 0; i < file_count; i++) free(files[i]);
+    struct winsize w;
+    int term_width = 80;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) == 0)
+        term_width = w.ws_col;
+
+    print_down_then_across(files, count, max_len, term_width);
+
+    for (int i = 0; i < count; i++)
+        free(files[i]);
     free(files);
 
     return 0;
 }
-
