@@ -1,12 +1,3 @@
-/*
- * Custom implementation of 'ls' - version 1.2.0
- * Feature: Column Display (Down Then Across)
- * Author: BSDSF23M002
- *
- * Task 2: Gather all filenames in a directory into a dynamic array
- * and calculate the length of the longest filename.
- */
-
 #define _POSIX_C_SOURCE 200809L
 
 #include <stdio.h>
@@ -21,18 +12,7 @@
 #include <grp.h>
 #include <time.h>
 
-/*
- * Function: gather_filenames
- * --------------------------
- * Reads all filenames from the given directory path into a dynamically allocated array.
- * Ignores hidden files (starting with '.').
- *
- * path: Directory path to read
- * count: Pointer to store number of files found
- * max_len: Pointer to store length of the longest filename
- *
- * returns: Pointer to array of strings (filenames). NULL on error.
- */
+/* ------------------ Gather all filenames ------------------ */
 char **gather_filenames(const char *path, int *count, int *max_len) {
     DIR *dir = opendir(path);
     if (!dir) {
@@ -53,15 +33,14 @@ char **gather_filenames(const char *path, int *count, int *max_len) {
     *max_len = 0;
 
     while ((entry = readdir(dir)) != NULL) {
-        if (entry->d_name[0] == '.') continue;
+        if (entry->d_name[0] == '.') continue; // skip hidden files
 
-        if (*count >= capacity) {
+        if (*count >= capacity) {  // resize array
             capacity *= 2;
             char **temp = realloc(files, capacity * sizeof(char *));
             if (!temp) {
                 perror("realloc");
-                for (int i = 0; i < *count; i++)
-                    free(files[i]);
+                for (int i = 0; i < *count; i++) free(files[i]);
                 free(files);
                 closedir(dir);
                 return NULL;
@@ -85,6 +64,22 @@ char **gather_filenames(const char *path, int *count, int *max_len) {
     return files;
 }
 
+/* ------------------ Terminal width & layout ------------------ */
+int get_terminal_width() {
+    struct winsize w;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) == -1) return 80;
+    return w.ws_col;
+}
+
+void calculate_layout(int total_files, int max_len, int spacing, int *cols, int *rows) {
+    int term_width = get_terminal_width();
+    *cols = term_width / (max_len + spacing);
+    if (*cols < 1) *cols = 1;
+
+    *rows = (total_files + *cols - 1) / *cols; // round up
+}
+
+/* ------------------ Main ------------------ */
 int main(int argc, char *argv[]) {
     char *path = ".";
     if (argc > 1) path = argv[1];
@@ -98,14 +93,21 @@ int main(int argc, char *argv[]) {
         return 0;
     }
 
-    printf("Total files: %d\n", file_count);
-    printf("Longest filename length: %d\n\n", max_len);
+    int spacing = 2;
+    int cols = 0, rows = 0;
+
+    calculate_layout(file_count, max_len, spacing, &cols, &rows);
+
+    printf("Terminal width: %d\n", get_terminal_width());
+    printf("Columns: %d, Rows: %d\n", cols, rows);
     printf("Files:\n");
     for (int i = 0; i < file_count; i++) {
         printf("%s\n", files[i]);
-        free(files[i]);
     }
+
+    for (int i = 0; i < file_count; i++) free(files[i]);
     free(files);
 
     return 0;
 }
+
